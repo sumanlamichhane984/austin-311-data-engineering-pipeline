@@ -1,0 +1,17 @@
+# Airflow logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+
+# Credentials
+keys/
+*.json
+
+# Docker
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
