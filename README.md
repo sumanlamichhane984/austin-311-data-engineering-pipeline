@@ -1,4 +1,4 @@
-# Austin 311 Data Engineering Pipeline
+# Austin 311 Incremental Pipeline
 
 ![GCP](https://img.shields.io/badge/Google_Cloud-4285F4?style=for-the-badge&logo=google-cloud&logoColor=white)
 ![BigQuery](https://img.shields.io/badge/BigQuery-4285F4?style=for-the-badge&logo=google-cloud&logoColor=white)
@@ -10,13 +10,15 @@
 
 ## Overview
 
-This project implements an incremental data engineering pipeline that ingests Austin 311 service request data from the BigQuery public dataset into a custom partitioned BigQuery table. The pipeline uses a SQL MERGE operation orchestrated by Apache Airflow (running locally via Docker) to perform daily incremental updates — loading only the last 7 days of data on each run.
+This project implements an incremental data engineering pipeline that ingests Austin 311 service request data from the BigQuery public dataset into a custom BigQuery table. The pipeline uses a SQL MERGE operation orchestrated by Apache Airflow (running locally via Docker) to perform incremental updates — loading only the last 7 days of data on each run.
 
 The pipeline is designed for cost-conscious engineering: manual DAG execution avoids unnecessary BigQuery query costs while still demonstrating production-grade incremental load patterns.
 
 ---
 
 ## Architecture
+
+![Pipeline Architecture](docs/austin_311_architecture.png)
 
 ```
 BigQuery Public Dataset
@@ -31,9 +33,8 @@ SQL MERGE Operation (Incremental - Last 7 Days)
         |
         v
 Custom BigQuery Table
-jenish-my-first-dog.austin_data_sets.raw_austin_311
+austin_data_sets.raw_austin_311
   - 13 columns, strongly typed
-  - Partitioned by created_date
   - Incremental history maintained
         |
         v
@@ -63,12 +64,15 @@ Apache Airflow (Docker)
 ## Repository Structure
 
 ```
-austin-311-data-engineering-pipeline/
-├── Dags/
-│   └── austin_311_merge_manual.py     # Airflow DAG definition
+austin311-incremental-pipeline/
+├── dags/
+│   └── austin_311_merge_manual.py        # Airflow DAG definition
 ├── sql/
 │   └── merge_austin_311_last_7_days.sql  # BigQuery MERGE SQL
-├── docker-compose.yml                 # Local Airflow setup (4 services)
+├── docs/
+│   └── austin_311_architecture.png       # Pipeline architecture diagram
+├── docker-compose.yml                    # Local Airflow setup (4 services)
+├── requirements.txt                      # Python dependencies
 ├── README.md
 └── .gitignore
 ```
@@ -103,7 +107,7 @@ austin-311-data-engineering-pipeline/
 
 ## MERGE Logic — How Incremental Load Works
 
-The core of this pipeline is a BigQuery MERGE statement that runs daily:
+The core of this pipeline is a BigQuery MERGE statement:
 
 ```
 Source: Last 7 days from public dataset
@@ -113,7 +117,7 @@ Source: Last 7 days from public dataset
 ```
 
 **Why 7 days instead of 1 day?**
-Austin 311 records are frequently updated after creation (status changes, close dates). Looking back 7 days ensures any late-arriving updates to existing records are captured — not just new records created today.
+Austin 311 records are frequently updated after creation (status changes, close dates). Looking back 7 days ensures late-arriving updates to existing records are captured — not just new records created today.
 
 **Why MERGE over INSERT OVERWRITE?**
 MERGE preserves historical records while updating changed ones. INSERT OVERWRITE would require reloading the entire dataset on every run, which is expensive and unnecessary for this use case.
@@ -133,7 +137,7 @@ MERGE preserves historical records while updating changed ones. INSERT OVERWRITE
 | SQL Location | `/opt/airflow/sql/` via `template_searchpath` |
 
 **Why manual trigger?**
-This project uses manual DAG execution to avoid unnecessary BigQuery query costs during development and demonstration. In a production environment, this would be set to `schedule="@daily"`.
+Manual DAG execution avoids unnecessary BigQuery query costs during development. In production this would be set to `schedule="@daily"`.
 
 ---
 
@@ -152,8 +156,8 @@ The `docker-compose.yml` spins up 4 services:
 
 1. Clone the repo:
 ```bash
-git clone https://github.com/sumanlamichhane984/austin-311-data-engineering-pipeline.git
-cd austin-311-data-engineering-pipeline
+git clone https://github.com/sumanlamichhane984/austin311-incremental-pipeline.git
+cd austin311-incremental-pipeline
 ```
 
 2. Add your GCP service account key:
@@ -192,17 +196,17 @@ SELECT COUNT(*) FROM `austin_data_sets.raw_austin_311`;
 ## Cost Optimization Notes
 
 - **Manual schedule** — No automatic runs means no unexpected BigQuery costs
-- **7-day window** — Only queries recent data instead of scanning the full public dataset
+- **7-day window** — Only queries recent data instead of full dataset scan
 - **MERGE over full reload** — Processes only changed/new records, minimizing bytes scanned
-- **LocalExecutor** — No need for CeleryExecutor or Kubernetes for single-machine development
+- **LocalExecutor** — No need for CeleryExecutor or Kubernetes for single-machine dev
 
 ---
 
 ## Challenges & Lessons Learned
 
-- **SQL template loading** — Using `template_searchpath` in the DAG instead of inline SQL keeps the DAG code clean and makes the SQL independently testable
+- **SQL template loading** — Using `template_searchpath` in the DAG instead of inline SQL keeps the DAG clean and makes the SQL independently testable
 - **Date casting** — The public dataset stores dates as TIMESTAMP, so explicit `DATE()` casting is required in the MERGE source query to match the destination schema
-- **Docker volume mapping** — The `./sql:/opt/airflow/sql` volume mount is critical — without it, Airflow cannot find the SQL template file at runtime
+- **Docker volume mapping** — The `./sql:/opt/airflow/sql` volume mount is critical — without it Airflow cannot find the SQL template file at runtime
 
 ---
 
